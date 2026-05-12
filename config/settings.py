@@ -33,6 +33,13 @@ INSTALLED_APPS = [
      "routing",
      "spam_protection",
      "ivr",
+     "dni",
+     "analytics",
+     "rtb",
+     "white_label",
+     "webhooks",
+     "notifications",
+     "billing"
 ]
 
 
@@ -142,4 +149,38 @@ from decouple import config
 TWILIO_ACCOUNT_SID = config('TWILIO_ACCOUNT_SID')
 TWILIO_AUTH_TOKEN = config('TWILIO_AUTH_TOKEN')
 
+CELERY_BROKER_URL =  config('CELERY_BROKER_URL')
+CELERY_RESULT_BACKEND = config('CELERY_RESULT_BACKEND')
 
+CELERY_BROKER_URL = config('REDIS_URL', default='redis://localhost:6379/0')
+CELERY_RESULT_BACKEND = config('REDIS_URL', default='redis://localhost:6379/0')
+CELERY_ACCEPT_CONTENT = ['json']
+CELERY_TASK_SERIALIZER = 'json'
+CELERY_RESULT_SERIALIZER = 'json'
+CELERY_TIMEZONE = 'UTC'
+CELERY_BEAT_SCHEDULE = {
+    'reset-daily-caps': {
+        'task': 'tasks.reset_daily_caps',
+        'schedule': 86400.0,  # every 24 hours
+    },
+    'send-daily-summary': {
+        'task': 'tasks.send_daily_summary',
+        'schedule': 86400.0,  # every 24 hours
+    },
+    'retry-failed-webhooks': {
+        'task': 'tasks.retry_failed_webhooks',
+        'schedule': 300.0,  # every 5 minutes
+    },
+    'expire-dni-sessions': {
+        'task': 'tasks.expire_dni_sessions',
+        'schedule': 300.0,  # every 5 minutes
+    },
+    'generate-monthly-invoices': {
+        'task': 'tasks.generate_monthly_invoices',
+        'schedule': 86400.0,  # every 24 hours
+    },
+    'check-auto-recharge': {
+        'task': 'tasks.check_auto_recharge',
+        'schedule': 3600.0,  # every 1 hour
+    },
+}

@@ -172,7 +172,7 @@ class RTBEngine:
         buyers = list(
             Buyer.objects.filter(
                 campaign_buyers__campaign=campaign,
-                campaign_buyers__status='active',
+                campaign_buyers__is_active=True,
                 status='active',
                 rtb_endpoint__isnull=False,
             ).exclude(rtb_endpoint='')

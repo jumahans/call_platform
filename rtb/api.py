@@ -6,7 +6,9 @@ from ninja import Router
 from .models import RTBAuction, RTBBid
 from .schemas import RTBAuctionOutSchema, BidResponseSchema, MessageSchema
 
-router = Router(tags=['RTB'])
+from accounts.api import JWTAuth
+
+router = Router(tags=['RTB'], auth=JWTAuth())
 
 
 # ─── Auctions ─────────────────────────────────────────────────────────────────

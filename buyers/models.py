@@ -70,8 +70,8 @@ class BuyerCampaign(models.Model):
     """Links a buyer to a campaign with specific settings"""
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    buyer = models.ForeignKey(Buyer, on_delete=models.CASCADE, related_name='campaign_assignments')
-    campaign = models.ForeignKey('campaigns.Campaign', on_delete=models.CASCADE, related_name='campaign_buyers')
+    buyer = models.ForeignKey(Buyer, on_delete=models.CASCADE, related_name='campaign_buyers')
+    campaign = models.ForeignKey('campaigns.Campaign', on_delete=models.CASCADE, related_name='campaign_assignments')
 
     priority = models.IntegerField(default=1)
     weight = models.IntegerField(default=100)

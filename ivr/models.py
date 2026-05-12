@@ -89,4 +89,6 @@ class IVRNodeTransition(models.Model):
         unique_together = ['from_node', 'trigger']
 
     def __str__(self):
-        return f"{self.from_node.name} --{self.trigger}--> {self.to_node.name if self.to_node else 'END'}"
+        return f"{self.from_node.name} --{self.trigger}--> {self.to_node.name if self.to_node else 'END'}" 
+
+

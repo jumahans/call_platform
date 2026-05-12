@@ -1,11 +1,24 @@
-from twilio.rest import Client
+# save as test_rtb.py
+import os
+import django
 
-client = Client('ACf744b4a8a52498b8f7d2f69d287d1814', 'f1f1d1c6b73c9d41286a7837d27fae43')
+os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings')
+django.setup()
 
-call = client.calls.create(
-    to='+17275945570',
-    from_='+254700392123',
-    url='https://agnostic-atrocious-luckily.ngrok-free.dev/api/twilio/incoming-call/'
+from campaigns.models import Campaign
+from rtb.engine import RTBEngine
+
+campaign = Campaign.objects.get(id='2417ab91-bb73-45f9-8f64-07210eaa1dfa')
+
+auction = RTBEngine.start_auction(
+    campaign=campaign,
+    caller_number='+254700392123',
+    caller_state='FL',
+    twilio_call_sid='TEST123'
 )
 
-print(call.sid)
+print(f"Auction ID: {auction.id}")
+print(f"Auction Status: {auction.status}")
+print(f"Winner: {auction.winner}")
+print(f"Winning Bid: {auction.winning_bid}")
+print(f"Duration: {auction.duration_ms}ms")
