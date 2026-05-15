@@ -127,8 +127,6 @@ def incoming_call(request: HttpRequest) -> HttpResponse:
 
 @csrf_exempt
 def call_status(request: HttpRequest) -> HttpResponse:
-    """Handle call status updates from Twilio"""
-
     if request.method != 'POST':
         return HttpResponse(status=405)
 
@@ -159,7 +157,42 @@ def call_status(request: HttpRequest) -> HttpResponse:
 
         call_log.save()
 
+        # Fire notifications based on call status
+        from notifications.services import NotificationService
+
+        if call_log.status == CallLog.Status.NO_ANSWER:
+            NotificationService.dispatch('call.missed', call_log.organization, {
+                'caller_number': call_log.caller_number,
+                'campaign_name': call_log.campaign.name if call_log.campaign else '',
+                'called_number': call_log.called_number,
+            })
+
+        elif call_log.status == CallLog.Status.COMPLETED:
+            NotificationService.dispatch('call.completed', call_log.organization, {
+                'caller_number': call_log.caller_number,
+                'campaign_name': call_log.campaign.name if call_log.campaign else '',
+                'duration': call_log.duration,
+            })
+
+        # Fire webhook events
+        from webhooks.services import WebhookService
+        event_map = {
+            CallLog.Status.COMPLETED: 'call.completed',
+            CallLog.Status.NO_ANSWER: 'call.no_answer',
+            CallLog.Status.FAILED: 'call.failed',
+        }
+        event = event_map.get(call_log.status)
+        if event:
+            WebhookService.dispatch(str(call_log.organization_id), event, {
+                'call_sid': call_sid,
+                'caller_number': call_log.caller_number,
+                'called_number': call_log.called_number,
+                'status': call_log.status,
+                'duration': call_log.duration,
+                'campaign_id': str(call_log.campaign_id) if call_log.campaign_id else None,
+            })
+
     except CallLog.DoesNotExist:
         pass
 
-    return HttpResponse('', content_type='text/xml')
+    return HttpResponse('', content_type='text/xml') 

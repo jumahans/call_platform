@@ -70,3 +70,15 @@ def list_logs(request: HttpRequest):
         }
         for l in logs
     ]
+
+@router.post("/test", response={200: dict, 400: dict})
+def test_notification(request: HttpRequest):
+    try:
+        NotificationService.dispatch('call.missed', request.auth.organization, {
+            'caller_number': '+254700392123',
+            'campaign_name': 'Test Campaign',
+            'called_number': '+17275945570',
+        })
+        return 200, {"message": "Notification dispatched successfully", "success": True}
+    except Exception as e:
+        return 400, {"detail": str(e)}
