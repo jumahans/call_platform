@@ -95,6 +95,30 @@ def add_destination(request: HttpRequest, rule_id: str, data: CreateDestinationS
     except ValueError as e:
         return 400, {"detail": str(e)}
 
+@router.get("/calls/live", response={200: List[CallLogListSchema]})
+def live_calls(request: HttpRequest):
+    calls = CallLog.objects.filter(
+        organization=request.auth.organization,
+        status=CallLog.Status.IN_PROGRESS
+    ).select_related('campaign', 'buyer', 'publisher').order_by('-created_at')
+
+    return 200, [
+        {
+            'id': str(c.id),
+            'caller_number': c.caller_number,
+            'called_number': c.called_number,
+            'destination_number': c.destination_number,
+            'status': c.status,
+            'duration': c.duration,
+            'campaign_id': str(c.campaign_id) if c.campaign_id else None,
+            'campaign_name': c.campaign.name if c.campaign else None,
+            'buyer_id': str(c.buyer_id) if c.buyer_id else None,
+            'buyer_name': c.buyer.name if c.buyer else None,
+            'revenue': str(c.revenue),
+            'created_at': c.created_at.isoformat(),
+        }
+        for c in calls
+    ]
 
 @router.get("/calls", response={200: List[CallLogListSchema]})
 def list_calls(request: HttpRequest, campaign_id: Optional[str] = None):
@@ -116,6 +140,8 @@ def list_calls(request: HttpRequest, campaign_id: Optional[str] = None):
         }
         for c in calls
     ]
+
+
 
 
 @router.get("/calls/{call_id}", response={200: CallLogOutSchema, 404: dict})

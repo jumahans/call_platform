@@ -46,6 +46,13 @@ class CreateCampaignSchema(Schema):
     duplicate_call_block_hours: int = 24
     cap: Optional[CampaignCapSchema] = None
     schedules: Optional[List[CampaignScheduleSchema]] = None
+    greeting_enabled: bool = False
+    greeting_message: Optional[str] = ''
+    whisper_enabled: bool = False
+    whisper_message: Optional[str] = ''
+    auto_sms_enabled: bool = False
+    auto_sms_message: Optional[str] = ''
+    recording_enabled: bool = True
 
     @field_validator('routing_type')
     @classmethod
@@ -86,6 +93,18 @@ class UpdateCampaignSchema(Schema):
     min_call_duration: Optional[int] = None
     duplicate_call_block: Optional[bool] = None
     duplicate_call_block_hours: Optional[int] = None
+    greeting_enabled: Optional[bool] = None
+    greeting_message: Optional[str] = None
+    whisper_enabled: Optional[bool] = None
+    whisper_message: Optional[str] = None
+    auto_sms_enabled: Optional[bool] = None
+    auto_sms_message: Optional[str] = None
+    recording_enabled: Optional[bool] = None
+    queue_enabled: Optional[bool] = None
+    queue_max_size: Optional[int] = None
+    queue_max_wait_seconds: Optional[int] = None
+    queue_music_url: Optional[str] = None
+    queue_message: Optional[str] = None
 
 
 # ===== RESPONSE SCHEMAS =====
@@ -122,8 +141,21 @@ class CampaignOutSchema(Schema):
     created_by_id: Optional[str] = None
     cap: Optional[CampaignCapOutSchema] = None
     schedules: List[CampaignScheduleOutSchema] = []
+    greeting_enabled: bool = False
+    greeting_message: str = ''
+    whisper_enabled: bool = False
+    whisper_message: str = ''
+    auto_sms_enabled: bool = False
+    auto_sms_message: str = ''
+    recording_enabled: bool = True
     created_at: str
     updated_at: str
+
+    queue_enabled: bool = False
+    queue_max_size: int = 10
+    queue_max_wait_seconds: int = 300
+    queue_music_url: str = ''
+    queue_message: str = ''
 
 
 class CampaignListOutSchema(Schema):

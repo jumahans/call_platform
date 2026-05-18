@@ -21,6 +21,8 @@ class Webhook(models.Model):
         CAMPAIGN_CAP_REACHED = 'campaign.cap_reached', 'Campaign Cap Reached'
         BUYER_CAP_REACHED = 'buyer.cap_reached', 'Buyer Cap Reached'
         PUBLISHER_CAP_REACHED = 'publisher.cap_reached', 'Publisher Cap Reached'
+        CRM_CONTACT_CREATED = 'crm.contact_created', 'CRM Contact Created'
+        CRM_DEAL_CREATED = 'crm.deal_created', 'CRM Deal Created'
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     organization = models.ForeignKey(Organization, on_delete=models.CASCADE, related_name='webhooks')

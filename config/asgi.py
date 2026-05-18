@@ -6,17 +6,17 @@ from django.urls import path
 
 os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings')
 
-from accounts.consumers import ActivityConsumer
-
 django_asgi_app = get_asgi_application()
 
-websocket_urlpatterns = [
-    path('ws/activity/', ActivityConsumer.as_asgi()),
-]
+from accounts.consumers import ActivityConsumer
+from routing.consumers import LiveCallConsumer
 
 application = ProtocolTypeRouter({
-    'http': django_asgi_app,
-    'websocket': AuthMiddlewareStack(
-        URLRouter(websocket_urlpatterns)
+    "http": django_asgi_app,
+    "websocket": AuthMiddlewareStack(
+        URLRouter([
+            path("ws/activity/", ActivityConsumer.as_asgi()),
+            path("ws/live-calls/", LiveCallConsumer.as_asgi()),
+        ])
     ),
 })

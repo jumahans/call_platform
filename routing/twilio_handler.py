@@ -10,7 +10,6 @@ from phone_numbers.models import PhoneNumber
 
 
 def validate_twilio_request(request: HttpRequest) -> bool:
-    """Validate that the request is genuinely from Twilio"""
     validator = RequestValidator(settings.TWILIO_AUTH_TOKEN)
     signature = request.headers.get('X-Twilio-Signature', '')
     url = request.build_absolute_uri()
@@ -20,24 +19,15 @@ def validate_twilio_request(request: HttpRequest) -> bool:
 
 @csrf_exempt
 def incoming_call(request: HttpRequest) -> HttpResponse:
-    """Handle incoming call from Twilio"""
-
     if request.method != 'POST':
         return HttpResponse(status=405)
 
-    # Validate request is from Twilio
-    # Uncomment in production:
-    # if not validate_twilio_request(request):
-    #     return HttpResponse(status=403)
-
-    # Extract call data from Twilio
     call_sid = request.POST.get('CallSid', '')
     caller_number = request.POST.get('From', '')
     called_number = request.POST.get('To', '')
     caller_state = request.POST.get('FromState', '')
     caller_country = request.POST.get('FromCountry', '')
 
-    # Get area code from caller number
     caller_area_code = ''
     if caller_number and len(caller_number) >= 5:
         cleaned = caller_number.replace('+1', '').replace('+', '')
@@ -49,7 +39,6 @@ def incoming_call(request: HttpRequest) -> HttpResponse:
     response = VoiceResponse()
 
     try:
-        # Find which phone number was called
         phone_number = PhoneNumber.objects.select_related(
             'campaign', 'publisher'
         ).get(number=called_number, status='active')
@@ -61,7 +50,10 @@ def incoming_call(request: HttpRequest) -> HttpResponse:
 
         campaign = phone_number.campaign
 
-        # Build call data for routing engine
+        # Play greeting message to caller before routing
+        if campaign.greeting_enabled and campaign.greeting_message:
+            response.say(campaign.greeting_message)
+
         call_data = {
             'caller_number': caller_number,
             'caller_area_code': caller_area_code,
@@ -69,12 +61,11 @@ def incoming_call(request: HttpRequest) -> HttpResponse:
             'caller_country': caller_country,
             'call_time': timezone.now(),
             'tags': [],
+            'twilio_call_sid': call_sid,
         }
 
-        # Route the call
         routing_result = RoutingEngine.route_call(str(campaign.id), call_data)
 
-        # Create call log
         call_log = CallLog.objects.create(
             organization=campaign.organization,
             campaign=campaign,
@@ -93,26 +84,91 @@ def incoming_call(request: HttpRequest) -> HttpResponse:
             publisher_payout=phone_number.publisher.payout_amount if phone_number.publisher else 0,
         )
 
+        # Broadcast new call to dashboard
+        from routing.broadcast import broadcast_call_to_org
+        broadcast_call_to_org(str(campaign.organization_id), {
+            'event': 'call_started',
+            'call_id': str(call_log.id),
+            'caller_number': caller_number,
+            'called_number': called_number,
+            'campaign_name': campaign.name,
+            'status': 'ringing',
+        })
+
         destination = routing_result.get('destination')
 
         if destination:
             call_log.destination_number = destination
             call_log.save(update_fields=['destination_number'])
 
+            action_url = f"{settings.BASE_URL}/api/twilio/call-status/"
+
             dial = Dial(
-                action=f"{settings.BASE_URL}/api/twilio/call-status/",
+                action=action_url,
                 method='POST',
                 timeout=30,
-                record='record-from-answer',
+                record='record-from-answer' if campaign.recording_enabled else 'do-not-record',
             )
-            dial.number(destination)
+
+            # Add whisper message to buyer before connecting
+            if campaign.whisper_enabled and campaign.whisper_message:
+                from twilio.twiml.voice_response import Number
+                number = Number(destination)
+                number.url = f"{settings.BASE_URL}/api/twilio/whisper/{str(campaign.id)}/"
+                dial.append(number)
+            else:
+                dial.number(destination)
+
             response.append(dial)
         else:
-            response.say("We are sorry, no agents are available right now. Please try again later.")
-            response.hangup()
+            # No buyer available — check if queuing is enabled
+            if campaign.queue_enabled:
+                from call_queue.services import CallQueueService
 
-            call_log.status = CallLog.Status.NO_ANSWER
-            call_log.save(update_fields=['status'])
+                if CallQueueService.check_queue_full(campaign):
+                    response.say("All agents are busy and the queue is full. Please try again later.")
+                    response.hangup()
+                    call_log.status = CallLog.Status.NO_ANSWER
+                    call_log.save(update_fields=['status'])
+                else:
+                    entry = CallQueueService.enqueue(
+                        campaign=campaign,
+                        caller_number=caller_number,
+                        called_number=called_number,
+                        twilio_call_sid=call_sid,
+                    )
+                    twiml = CallQueueService.get_queue_twiml(campaign, entry)
+                    return HttpResponse(twiml, content_type='text/xml')
+            else:
+                response.say("We are sorry, no agents are available right now. Please try again later.")
+
+                # Auto SMS reply when no answer
+                if campaign.auto_sms_enabled and campaign.auto_sms_message:
+                    try:
+                        from twilio.rest import Client
+                        client = Client(settings.TWILIO_ACCOUNT_SID, settings.TWILIO_AUTH_TOKEN)
+                        client.messages.create(
+                            body=campaign.auto_sms_message,
+                            from_=called_number,
+                            to=caller_number
+                        )
+                    except Exception:
+                        pass
+
+                response.hangup()
+
+                call_log.status = CallLog.Status.NO_ANSWER
+                call_log.save(update_fields=['status'])
+
+                
+                # Broadcast call update to dashboard
+                from routing.broadcast import broadcast_call_to_org
+                broadcast_call_to_org(str(call_log.organization_id), {
+                    'event': 'call_updated',
+                    'call_id': str(call_log.id),
+                    'status': call_log.status,
+                    'duration': call_log.duration,
+                })
 
     except PhoneNumber.DoesNotExist:
         response.say("This number is not recognized. Please try again later.")
@@ -121,6 +177,22 @@ def incoming_call(request: HttpRequest) -> HttpResponse:
     except Exception as e:
         response.say("We are experiencing technical difficulties. Please try again later.")
         response.hangup()
+
+    return HttpResponse(str(response), content_type='text/xml')
+
+
+@csrf_exempt
+def whisper(request: HttpRequest, campaign_id: str) -> HttpResponse:
+    """Plays whisper message to buyer before connecting"""
+    response = VoiceResponse()
+
+    try:
+        from campaigns.models import Campaign
+        campaign = Campaign.objects.get(id=campaign_id)
+        if campaign.whisper_message:
+            response.say(campaign.whisper_message)
+    except Exception:
+        pass
 
     return HttpResponse(str(response), content_type='text/xml')
 
@@ -156,8 +228,46 @@ def call_status(request: HttpRequest) -> HttpResponse:
             call_log.recording_sid = recording_sid
 
         call_log.save()
+        # Charge organization for completed call
+        if call_log.status == CallLog.Status.COMPLETED and call_log.duration > 0:
+            try:
+                from billing.services import BillingService
+                campaign = call_log.campaign
+                if campaign and campaign.revenue_amount > 0:
+                    BillingService.charge_call(
+                        organization=call_log.organization,
+                        campaign=campaign,
+                        buyer=call_log.buyer,
+                        publisher=call_log.publisher,
+                        amount=campaign.revenue_amount,
+                        call_sid=call_sid,
+                    )
+                if call_log.publisher and call_log.publisher.payout_amount > 0:
+                    BillingService.payout(
+                        organization=call_log.organization,
+                        publisher=call_log.publisher,
+                        amount=call_log.publisher.payout_amount,
+                        call_sid=call_sid,
+                    )
+            except Exception:
+                pass
 
-        # Fire notifications based on call status
+        # Auto SMS on missed call
+        if call_log.status == CallLog.Status.NO_ANSWER:
+            try:
+                campaign = call_log.campaign
+                if campaign and campaign.auto_sms_enabled and campaign.auto_sms_message:
+                    from twilio.rest import Client
+                    client = Client(settings.TWILIO_ACCOUNT_SID, settings.TWILIO_AUTH_TOKEN)
+                    client.messages.create(
+                        body=campaign.auto_sms_message,
+                        from_=call_log.called_number,
+                        to=call_log.caller_number
+                    )
+            except Exception:
+                pass
+
+        # Fire notifications
         from notifications.services import NotificationService
 
         if call_log.status == CallLog.Status.NO_ANSWER:
@@ -174,7 +284,7 @@ def call_status(request: HttpRequest) -> HttpResponse:
                 'duration': call_log.duration,
             })
 
-        # Fire webhook events
+        # Fire webhooks
         from webhooks.services import WebhookService
         event_map = {
             CallLog.Status.COMPLETED: 'call.completed',
@@ -189,10 +299,28 @@ def call_status(request: HttpRequest) -> HttpResponse:
                 'called_number': call_log.called_number,
                 'status': call_log.status,
                 'duration': call_log.duration,
+                'recording_url': call_log.recording_url,
                 'campaign_id': str(call_log.campaign_id) if call_log.campaign_id else None,
+            })
+
+        # CRM webhook — fires on every completed call
+        if call_log.status == CallLog.Status.COMPLETED:
+            from webhooks.services import WebhookService
+            WebhookService.dispatch(str(call_log.organization_id), 'crm.contact_created', {
+                'call_sid': call_sid,
+                'caller_number': call_log.caller_number,
+                'called_number': call_log.called_number,
+                'campaign_id': str(call_log.campaign_id) if call_log.campaign_id else None,
+                'campaign_name': call_log.campaign.name if call_log.campaign else '',
+                'buyer_id': str(call_log.buyer_id) if call_log.buyer_id else None,
+                'buyer_name': call_log.buyer.name if call_log.buyer else '',
+                'duration': call_log.duration,
+                'recording_url': call_log.recording_url or '',
+                'started_at': call_log.created_at.isoformat(),
+                'ended_at': call_log.ended_at.isoformat() if call_log.ended_at else '',
             })
 
     except CallLog.DoesNotExist:
         pass
 
-    return HttpResponse('', content_type='text/xml') 
+    return HttpResponse('', content_type='text/xml')

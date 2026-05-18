@@ -200,3 +200,93 @@ class BillingService:
             'created_at': account.created_at.isoformat(),
             'updated_at': account.updated_at.isoformat(),
         }
+
+
+
+    @staticmethod
+    def save_payment_method(payment_method_id: str, user: User) -> dict:
+        try:
+            import stripe
+            from django.conf import settings
+            stripe.api_key = settings.STRIPE_SECRET_KEY
+
+            account = BillingService.get(user)
+
+            if not account.stripe_customer_id:
+                customer = stripe.Customer.create(
+                    email=user.email,
+                    name=user.organization.name,
+                )
+                account.stripe_customer_id = customer.id
+                account.save(update_fields=['stripe_customer_id'])
+
+            # Attach payment method to customer
+            stripe.PaymentMethod.attach(
+                payment_method_id,
+                customer=account.stripe_customer_id,
+            )
+
+            # Set as default
+            stripe.Customer.modify(
+                account.stripe_customer_id,
+                invoice_settings={'default_payment_method': payment_method_id},
+            )
+
+            account.stripe_payment_method_id = payment_method_id
+            account.save(update_fields=['stripe_payment_method_id'])
+
+            return {'message': 'Payment method saved successfully', 'success': True}
+
+        except Exception as e:
+            raise ValueError(f"Stripe error: {str(e)}")
+
+
+    @staticmethod
+    def list_payment_methods(user: User) -> list:
+        try:
+            import stripe
+            from django.conf import settings
+            stripe.api_key = settings.STRIPE_SECRET_KEY
+
+            account = BillingService.get(user)
+
+            if not account.stripe_customer_id:
+                return []
+
+            methods = stripe.PaymentMethod.list(
+                customer=account.stripe_customer_id,
+                type='card',
+            )
+
+            return [
+                {
+                    'id': pm.id,
+                    'brand': pm.card.brand,
+                    'last4': pm.card.last4,
+                    'exp_month': pm.card.exp_month,
+                    'exp_year': pm.card.exp_year,
+                    'is_default': pm.id == account.stripe_payment_method_id,
+                }
+                for pm in methods.data
+            ]
+
+        except Exception as e:
+            raise ValueError(f"Stripe error: {str(e)}")
+
+
+    @staticmethod
+    def delete_payment_method(payment_method_id: str, user: User):
+        try:
+            import stripe
+            from django.conf import settings
+            stripe.api_key = settings.STRIPE_SECRET_KEY
+
+            stripe.PaymentMethod.detach(payment_method_id)
+
+            account = BillingService.get(user)
+            if account.stripe_payment_method_id == payment_method_id:
+                account.stripe_payment_method_id = ''
+                account.save(update_fields=['stripe_payment_method_id'])
+
+        except Exception as e:
+            raise ValueError(f"Stripe error: {str(e)}")

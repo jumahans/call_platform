@@ -66,3 +66,52 @@ def export_calls(request: HttpRequest, filters: AnalyticsFilterSchema = Query(..
     response = HttpResponse(csv_data, content_type='text/csv')
     response['Content-Disposition'] = 'attachment; filename="call_log.csv"'
     return response
+
+@router.get("/calls/{call_id}/recording", response={200: dict, 404: dict})
+def get_recording(request: HttpRequest, call_id: str):
+    from routing.models import CallLog
+    try:
+        call = CallLog.objects.get(
+            id=call_id,
+            organization=request.auth.organization
+        )
+        if not call.recording_url:
+            return 404, {"detail": "No recording available for this call"}
+        return 200, {
+            'call_id': str(call.id),
+            'recording_url': call.recording_url,
+            'recording_sid': getattr(call, 'recording_sid', '') or '',
+            'duration': call.duration or 0,
+            'caller_number': call.caller_number,
+            'campaign_name': call.campaign.name if call.campaign else '',
+            'created_at': call.created_at.isoformat(),
+        }
+    except CallLog.DoesNotExist:
+        return 404, {"detail": "Call not found"}
+    
+
+@router.get("/live", response={200: list})
+def live_calls(request: HttpRequest):
+    from routing.models import CallLog
+    from django.utils import timezone
+
+    calls = CallLog.objects.filter(
+        organization=request.auth.organization,
+        status='in_progress'
+    ).select_related('campaign', 'buyer', 'publisher').order_by('-created_at')
+
+    return 200, [
+        {
+            'id': str(c.id),
+            'caller_number': c.caller_number,
+            'called_number': c.called_number,
+            'campaign_id': str(c.campaign_id) if c.campaign_id else None,
+            'campaign_name': c.campaign.name if c.campaign else None,
+            'buyer_id': str(c.buyer_id) if c.buyer_id else None,
+            'buyer_name': c.buyer.name if c.buyer else None,
+            'destination': getattr(c, 'destination_number', '') or '',
+            'duration_seconds': (timezone.now() - c.created_at).seconds,
+            'started_at': c.created_at.isoformat(),
+        }
+        for c in calls
+    ]

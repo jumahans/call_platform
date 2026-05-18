@@ -98,3 +98,70 @@ def list_invoices(request: HttpRequest):
         }
         for i in invoices
     ]
+
+
+
+@router.post("/payment-methods", response={200: dict, 400: dict})
+def save_payment_method(request: HttpRequest, payment_method_id: str):
+    try:
+        result = BillingService.save_payment_method(payment_method_id, request.auth)
+        return 200, result
+    except ValueError as e:
+        return 400, {"detail": str(e)}
+
+
+@router.get("/payment-methods", response={200: list})
+def list_payment_methods(request: HttpRequest):
+    try:
+        methods = BillingService.list_payment_methods(request.auth)
+        return 200, methods
+    except ValueError as e:
+        return 400, {"detail": str(e)}
+
+
+@router.delete("/payment-methods/{payment_method_id}", response={200: dict, 400: dict})
+def delete_payment_method(request: HttpRequest, payment_method_id: str):
+    try:
+        BillingService.delete_payment_method(payment_method_id, request.auth)
+        return 200, {"message": "Payment method removed", "success": True}
+    except ValueError as e:
+        return 400, {"detail": str(e)}
+
+
+@router.post("/stripe-webhook", auth=None, response={200: dict})
+def stripe_webhook(request: HttpRequest):
+    import stripe
+    from django.conf import settings
+    stripe.api_key = settings.STRIPE_SECRET_KEY
+
+    payload = request.body
+    sig_header = request.headers.get('Stripe-Signature', '')
+
+    try:
+        event = stripe.Webhook.construct_event(
+            payload, sig_header, settings.STRIPE_WEBHOOK_SECRET
+        )
+    except Exception:
+        return 200, {"status": "ignored"}
+
+    if event['type'] == 'payment_intent.succeeded':
+        intent = event['data']['object']
+        organization_id = intent.get('metadata', {}).get('organization_id')
+        amount = Decimal(intent['amount']) / 100
+
+        if organization_id:
+            try:
+                from accounts.models import Organization
+                org = Organization.objects.get(id=organization_id)
+                account = BillingAccount.objects.get(organization=org)
+                user = org.members.filter(role='admin').first()
+                if user:
+                    BillingService.deposit(
+                        amount=amount,
+                        user=user,
+                        stripe_payment_intent_id=intent['id']
+                    )
+            except Exception:
+                pass
+
+    return 200, {"status": "ok"}

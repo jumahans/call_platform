@@ -27,6 +27,13 @@ class CampaignService:
             min_call_duration=data.min_call_duration,
             duplicate_call_block=data.duplicate_call_block,
             duplicate_call_block_hours=data.duplicate_call_block_hours,
+            greeting_enabled=data.greeting_enabled,
+            greeting_message=data.greeting_message or '',
+            whisper_enabled=data.whisper_enabled,
+            whisper_message=data.whisper_message or '',
+            auto_sms_enabled=data.auto_sms_enabled,
+            auto_sms_message=data.auto_sms_message or '',
+            recording_enabled=data.recording_enabled,
             status=Campaign.Status.ACTIVE
         )
 
@@ -86,7 +93,11 @@ class CampaignService:
             'name', 'description', 'routing_type',
             'payout_amount', 'revenue_amount',
             'min_call_duration', 'duplicate_call_block',
-            'duplicate_call_block_hours'
+            'duplicate_call_block_hours',
+            'greeting_enabled', 'greeting_message',
+            'whisper_enabled', 'whisper_message',
+            'auto_sms_enabled', 'auto_sms_message',
+            'recording_enabled'
         }
 
         for field, value in data.model_dump(exclude_none=True).items():
@@ -226,4 +237,11 @@ class CampaignService:
             'schedules': schedules,
             'created_at': campaign.created_at.isoformat(),
             'updated_at': campaign.updated_at.isoformat(),
+            'greeting_enabled': campaign.greeting_enabled,
+            'greeting_message': campaign.greeting_message,
+            'whisper_enabled': campaign.whisper_enabled,
+            'whisper_message': campaign.whisper_message,
+            'auto_sms_enabled': campaign.auto_sms_enabled,
+            'auto_sms_message': campaign.auto_sms_message,
+            'recording_enabled': campaign.recording_enabled,
         }

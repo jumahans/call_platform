@@ -36,6 +36,27 @@ class Campaign(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
+    # Greeting and whisper
+    greeting_message = models.TextField(blank=True)
+    greeting_enabled = models.BooleanField(default=False)
+    whisper_message = models.TextField(blank=True)
+    whisper_enabled = models.BooleanField(default=False)
+
+    # Auto SMS
+    auto_sms_enabled = models.BooleanField(default=False)
+    auto_sms_message = models.TextField(blank=True)
+
+    # Recording
+    recording_enabled = models.BooleanField(default=True)
+    recording_storage = models.CharField(max_length=20, default='twilio')
+
+    # Call Queuing
+    queue_enabled = models.BooleanField(default=False)
+    queue_max_size = models.IntegerField(default=10)
+    queue_max_wait_seconds = models.IntegerField(default=300)
+    queue_music_url = models.URLField(blank=True, default='')
+    queue_message = models.TextField(blank=True, default='All agents are busy. Please hold.')
+
     class Meta:
         db_table = 'campaigns'
         ordering = ['-created_at']
