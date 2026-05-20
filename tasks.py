@@ -25,7 +25,8 @@ def send_daily_summary():
     for org in organizations:
         try:
             # Get a dummy user for the org
-            user = org.members.filter(role='admin').first()
+            from accounts.models import User
+            user = User.objects.filter(organization=org, role='admin').first()
             if not user:
                 continue
 
