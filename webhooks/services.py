@@ -148,3 +148,118 @@ class WebhookService:
             'created_at': webhook.created_at.isoformat(),
             'updated_at': webhook.updated_at.isoformat(),
         }
+    
+
+class ConversionPixelService:
+    """Handles incoming conversion postbacks from buyers."""
+
+    @staticmethod
+    def record_conversion(token: str, caller_number: str, conversion_value=None, raw_payload=None, source_ip=None) -> dict:
+        from .models import ConversionPixel, ConversionEvent
+        from routing.models import CallLog
+        from decimal import Decimal
+
+        try:
+            pixel = ConversionPixel.objects.get(token=token, status=ConversionPixel.Status.ACTIVE)
+        except ConversionPixel.DoesNotExist:
+            return {'success': False, 'error': 'Invalid or inactive pixel token'}
+
+        # Find matching call log (most recent call from this caller in this org)
+        call_log = CallLog.objects.filter(
+            organization=pixel.organization,
+            caller_number=caller_number,
+        ).order_by('-created_at').first()
+
+        value = Decimal(str(conversion_value)) if conversion_value is not None else pixel.conversion_value
+
+        event = ConversionEvent.objects.create(
+            pixel=pixel,
+            call_log=call_log,
+            caller_number=caller_number,
+            conversion_value=value,
+            raw_payload=raw_payload or {},
+            source_ip=source_ip,
+        )
+
+        # Mark the call as converted (if CallLog has the field, else skip)
+        if call_log and hasattr(call_log, 'is_converted'):
+            call_log.is_converted = True
+            call_log.save(update_fields=['is_converted'])
+
+        return {
+            'success': True,
+            'event_id': str(event.id),
+            'matched_call': str(call_log.id) if call_log else None,
+            'conversion_value': str(value),
+        }
+    
+    @staticmethod
+    def create_pixel(data, user):
+        from .models import ConversionPixel
+        from campaigns.models import Campaign
+        import secrets
+
+        campaign = None
+        if data.campaign_id:
+            try:
+                campaign = Campaign.objects.get(id=data.campaign_id, organization=user.organization)
+            except Campaign.DoesNotExist:
+                raise ValueError("Campaign not found")
+
+        pixel = ConversionPixel.objects.create(
+            organization=user.organization,
+            campaign=campaign,
+            name=data.name,
+            token=secrets.token_urlsafe(32),
+            conversion_value=data.conversion_value,
+        )
+        return pixel
+
+    @staticmethod
+    def list_pixels(user):
+        from .models import ConversionPixel
+        return ConversionPixel.objects.filter(organization=user.organization).order_by('-created_at')
+
+    @staticmethod
+    def get_pixel(pixel_id: str, user):
+        from .models import ConversionPixel
+        try:
+            return ConversionPixel.objects.get(id=pixel_id, organization=user.organization)
+        except ConversionPixel.DoesNotExist:
+            raise ValueError("Pixel not found")
+
+    @staticmethod
+    def update_pixel(pixel_id: str, data, user):
+        pixel = ConversionPixelService.get_pixel(pixel_id, user)
+        for field, value in data.model_dump(exclude_none=True).items():
+            if field == 'campaign_id':
+                from campaigns.models import Campaign
+                try:
+                    pixel.campaign = Campaign.objects.get(id=value, organization=user.organization)
+                except Campaign.DoesNotExist:
+                    raise ValueError("Campaign not found")
+            else:
+                setattr(pixel, field, value)
+        pixel.save()
+        return pixel
+
+    @staticmethod
+    def delete_pixel(pixel_id: str, user):
+        pixel = ConversionPixelService.get_pixel(pixel_id, user)
+        pixel.delete()
+
+    @staticmethod
+    def format_pixel(pixel, request=None) -> dict:
+        from django.conf import settings
+        base_url = getattr(settings, 'BASE_URL', 'http://localhost:8000')
+        return {
+            'id': str(pixel.id),
+            'name': pixel.name,
+            'token': pixel.token,
+            'campaign_id': str(pixel.campaign_id) if pixel.campaign_id else None,
+            'conversion_value': str(pixel.conversion_value),
+            'status': pixel.status,
+            'postback_url': f"{base_url}/api/webhooks/conversion/{pixel.token}",
+            'created_at': pixel.created_at.isoformat(),
+        }
+    

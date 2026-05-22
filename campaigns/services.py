@@ -20,6 +20,8 @@ class CampaignService:
             organization=user.organization,
             created_by=user,
             name=data.name,
+            bid_floor=data.bid_floor,
+            rtb_timeout_seconds=data.rtb_timeout_seconds,
             description=data.description or '',
             routing_type=data.routing_type,
             payout_amount=data.payout_amount,
@@ -35,6 +37,7 @@ class CampaignService:
             auto_sms_message=data.auto_sms_message or '',
             recording_enabled=data.recording_enabled,
             status=Campaign.Status.ACTIVE
+            
         )
 
         # Create cap
@@ -244,4 +247,6 @@ class CampaignService:
             'auto_sms_enabled': campaign.auto_sms_enabled,
             'auto_sms_message': campaign.auto_sms_message,
             'recording_enabled': campaign.recording_enabled,
+            'bid_floor': str(campaign.bid_floor),
+            'rtb_timeout_seconds': campaign.rtb_timeout_seconds,
         }

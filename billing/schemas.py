@@ -25,6 +25,7 @@ class BillingAccountOutSchema(Schema):
     auto_recharge_amount: Decimal
     auto_recharge_threshold: Decimal
     stripe_customer_id: str
+    currency: str
     status: str
     organization_id: str
     created_at: str

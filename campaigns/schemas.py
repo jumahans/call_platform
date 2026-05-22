@@ -44,6 +44,8 @@ class CreateCampaignSchema(Schema):
     min_call_duration: int = 0
     duplicate_call_block: bool = False
     duplicate_call_block_hours: int = 24
+    bid_floor: Decimal = Decimal('0')
+    rtb_timeout_seconds: int = 5
     cap: Optional[CampaignCapSchema] = None
     schedules: Optional[List[CampaignScheduleSchema]] = None
     greeting_enabled: bool = False
@@ -69,7 +71,7 @@ class CreateCampaignSchema(Schema):
             raise ValueError('Campaign name must be at least 2 characters')
         return v.strip()
 
-    @field_validator('payout_amount', 'revenue_amount')
+    @field_validator('payout_amount', 'revenue_amount', 'bid_floor')
     @classmethod
     def validate_amounts(cls, v: Decimal) -> Decimal:
         if v < 0:
@@ -83,6 +85,13 @@ class CreateCampaignSchema(Schema):
             raise ValueError('min_call_duration cannot be negative')
         return v
 
+    @field_validator('rtb_timeout_seconds')
+    @classmethod
+    def validate_timeout(cls, v: int) -> int:
+        if v < 1 or v > 30:
+            raise ValueError('rtb_timeout_seconds must be between 1 and 30')
+        return v
+
 
 class UpdateCampaignSchema(Schema):
     name: Optional[str] = None
@@ -93,6 +102,8 @@ class UpdateCampaignSchema(Schema):
     min_call_duration: Optional[int] = None
     duplicate_call_block: Optional[bool] = None
     duplicate_call_block_hours: Optional[int] = None
+    bid_floor: Optional[Decimal] = None
+    rtb_timeout_seconds: Optional[int] = None
     greeting_enabled: Optional[bool] = None
     greeting_message: Optional[str] = None
     whisper_enabled: Optional[bool] = None
@@ -137,6 +148,8 @@ class CampaignOutSchema(Schema):
     min_call_duration: int
     duplicate_call_block: bool
     duplicate_call_block_hours: int
+    bid_floor: str
+    rtb_timeout_seconds: int
     organization_id: str
     created_by_id: Optional[str] = None
     cap: Optional[CampaignCapOutSchema] = None

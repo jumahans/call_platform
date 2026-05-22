@@ -1,7 +1,6 @@
 from ninja import Router, Query
 from django.http import HttpRequest, HttpResponse
 from typing import List
-
 from accounts.api import JWTAuth
 from .schemas import (
     AnalyticsFilterSchema,
@@ -115,3 +114,10 @@ def live_calls(request: HttpRequest):
         }
         for c in calls
     ]
+
+
+@router.get('/caller-profile/{caller_number}')
+def get_caller_profile(request, caller_number: str):
+    from analytics.services import CallerProfileService
+    organization_id = str(request.auth.organization_id)
+    return CallerProfileService.get_profile(organization_id, caller_number)

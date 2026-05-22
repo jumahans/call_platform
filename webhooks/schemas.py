@@ -1,6 +1,6 @@
 from ninja import Schema
 from typing import Optional, List
-
+from decimal import Decimal
 
 class CreateWebhookSchema(Schema):
     name: str
@@ -48,3 +48,27 @@ class WebhookOutSchema(Schema):
 class MessageResponseSchema(Schema):
     message: str
     success: bool = True
+
+
+class CreateConversionPixelSchema(Schema):
+    name: str
+    campaign_id: Optional[str] = None
+    conversion_value: Decimal = Decimal('0')
+
+
+class UpdateConversionPixelSchema(Schema):
+    name: Optional[str] = None
+    campaign_id: Optional[str] = None
+    conversion_value: Optional[Decimal] = None
+    status: Optional[str] = None
+
+
+class ConversionPixelOutSchema(Schema):
+    id: str
+    name: str
+    token: str
+    campaign_id: Optional[str] = None
+    conversion_value: str
+    status: str
+    postback_url: str
+    created_at: str

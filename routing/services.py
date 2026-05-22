@@ -193,4 +193,8 @@ class RoutingService:
             'notes': call.notes,
             'created_at': call.created_at.isoformat(),
             'updated_at': call.updated_at.isoformat(),
+            'transcription_text': call.transcription_text,
+            'transcription_status': call.transcription_status,
+            'sentiment': call.sentiment,
+            'sentiment_score': call.sentiment_score,
         }

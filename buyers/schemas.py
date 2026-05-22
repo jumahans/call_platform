@@ -22,6 +22,8 @@ class CreateBuyerSchema(Schema):
     payout_amount: Decimal = Decimal('0.00')
     min_call_duration: int = 0
     max_concurrency: int = 0
+    dup_window_days: int = 30
+    quality_score: int = 50
     cap: Optional[BuyerCapSchema] = None
 
     @field_validator('name')
@@ -63,6 +65,8 @@ class UpdateBuyerSchema(Schema):
     payout_amount: Optional[Decimal] = None
     min_call_duration: Optional[int] = None
     max_concurrency: Optional[int] = None
+    dup_window_days: Optional[int] = None
+    quality_score: Optional[int] = None
 
 
 class AssignCampaignSchema(Schema):
@@ -101,6 +105,8 @@ class BuyerOutSchema(Schema):
     payout_amount: str
     min_call_duration: int
     max_concurrency: int
+    dup_window_days: int
+    quality_score: int
     organization_id: str
     created_by_id: Optional[str] = None
     cap: Optional[BuyerCapOutSchema] = None

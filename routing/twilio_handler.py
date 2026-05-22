@@ -203,7 +203,7 @@ def call_status(request: HttpRequest) -> HttpResponse:
         return HttpResponse(status=405)
 
     call_sid = request.POST.get('CallSid', '')
-    call_status = request.POST.get('CallStatus', '')
+    twilio_status = request.POST.get('CallStatus', '')
     call_duration = request.POST.get('CallDuration', 0)
     recording_url = request.POST.get('RecordingUrl', '')
     recording_sid = request.POST.get('RecordingSid', '')
@@ -216,10 +216,47 @@ def call_status(request: HttpRequest) -> HttpResponse:
         'in-progress': CallLog.Status.IN_PROGRESS,
     }
 
+    # Twilio sends DialCallStatus when <Dial> action fires
+    dial_status = request.POST.get('DialCallStatus', '')
+
+    # If dial failed (busy/no-answer/failed), try next destination
+    if dial_status in ('busy', 'no-answer', 'failed'):
+        try:
+            failed_log = CallLog.objects.get(twilio_call_sid=call_sid)
+            from routing.engine import RoutingEngine
+
+            call_data = {
+                'caller_number': failed_log.caller_number,
+                'caller_area_code': failed_log.caller_area_code,
+                'caller_state': failed_log.caller_state,
+                'call_time': timezone.now(),
+                'tags': list(failed_log.tags) if failed_log.tags else [],
+                'twilio_call_sid': call_sid,
+                'exclude_buyer_id': str(failed_log.buyer_id) if failed_log.buyer_id else None,
+            }
+
+            routing_result = RoutingEngine.route_call(str(failed_log.campaign_id), call_data)
+            next_destination = routing_result.get('destination')
+
+            if next_destination:
+                response = VoiceResponse()
+                action_url = f"{settings.BASE_URL}/api/twilio/call-status/"
+                dial = Dial(action=action_url, method='POST', timeout=30)
+                dial.number(next_destination)
+                response.append(dial)
+
+                failed_log.buyer = routing_result.get('buyer')
+                failed_log.destination_number = next_destination
+                failed_log.save(update_fields=['buyer', 'destination_number'])
+
+                return HttpResponse(str(response), content_type='text/xml')
+        except CallLog.DoesNotExist:
+            pass
+
     try:
         call_log = CallLog.objects.get(twilio_call_sid=call_sid)
 
-        call_log.status = status_map.get(call_status, CallLog.Status.FAILED)
+        call_log.status = status_map.get(twilio_status, CallLog.Status.FAILED) 
         call_log.duration = int(call_duration) if call_duration else 0
         call_log.ended_at = timezone.now()
 
@@ -228,6 +265,23 @@ def call_status(request: HttpRequest) -> HttpResponse:
             call_log.recording_sid = recording_sid
 
         call_log.save()
+
+        # Kick off transcription in the background (only if recording exists)
+        if call_log.recording_url and call_log.status == CallLog.Status.COMPLETED:
+            try:
+                from tasks import transcribe_call_recording
+                transcribe_call_recording.delay(str(call_log.id))
+            except Exception:
+                pass
+
+        # Update buyer quality score on terminal statuses
+        if call_log.buyer and call_log.status in (CallLog.Status.COMPLETED, CallLog.Status.NO_ANSWER, CallLog.Status.BUSY, CallLog.Status.FAILED):
+            try:
+                from rtb.services import RTBService
+                RTBService.update_buyer_quality_score(call_log.buyer)
+            except Exception:
+                pass
+            
         # Charge organization for completed call
         if call_log.status == CallLog.Status.COMPLETED and call_log.duration > 0:
             try:
@@ -324,3 +378,117 @@ def call_status(request: HttpRequest) -> HttpResponse:
         pass
 
     return HttpResponse('', content_type='text/xml')
+
+@csrf_exempt
+def click_to_call(request: HttpRequest) -> HttpResponse:
+    """
+    Public endpoint — website widget calls this to initiate a click-to-call.
+    Expects: campaign_id, visitor_number (the person who clicked).
+    """
+    import json
+    from twilio.rest import Client
+    from campaigns.models import Campaign
+
+    if request.method != 'POST':
+        return HttpResponse(status=405)
+
+    try:
+        data = json.loads(request.body) if request.body else {}
+    except json.JSONDecodeError:
+        data = request.POST.dict()
+
+    campaign_id = data.get('campaign_id', '')
+    visitor_number = data.get('visitor_number', '')
+
+    if not campaign_id or not visitor_number:
+        return HttpResponse(
+            json.dumps({'success': False, 'error': 'campaign_id and visitor_number required'}),
+            content_type='application/json',
+            status=400,
+        )
+
+    try:
+        campaign = Campaign.objects.get(id=campaign_id, status='active')
+    except Campaign.DoesNotExist:
+        return HttpResponse(
+            json.dumps({'success': False, 'error': 'Campaign not found or inactive'}),
+            content_type='application/json',
+            status=404,
+        )
+
+    # Find a tracking number for this campaign to call FROM
+    from phone_numbers.models import PhoneNumber
+    phone_number = PhoneNumber.objects.filter(campaign=campaign, status='active').first()
+    if not phone_number:
+        return HttpResponse(
+            json.dumps({'success': False, 'error': 'No number configured for this campaign'}),
+            content_type='application/json',
+            status=400,
+        )
+
+    try:
+        client = Client(settings.TWILIO_ACCOUNT_SID, settings.TWILIO_AUTH_TOKEN)
+        # Call the visitor first; when they answer, Twilio hits our incoming-call logic
+        call = client.calls.create(
+            to=visitor_number,
+            from_=phone_number.number,
+            url=f"{settings.BASE_URL}/api/twilio/click-to-call-connect/{campaign_id}/",
+        )
+        return HttpResponse(
+            json.dumps({'success': True, 'call_sid': call.sid}),
+            content_type='application/json',
+        )
+    except Exception as e:
+        return HttpResponse(
+            json.dumps({'success': False, 'error': str(e)}),
+            content_type='application/json',
+            status=500,
+        )
+
+
+@csrf_exempt
+def click_to_call_connect(request: HttpRequest, campaign_id: str) -> HttpResponse:
+    """
+    When the visitor answers, this routes them to a buyer via the normal engine.
+    """
+    from campaigns.models import Campaign
+
+    response = VoiceResponse()
+
+    try:
+        campaign = Campaign.objects.get(id=campaign_id)
+    except Campaign.DoesNotExist:
+        response.say("This campaign is no longer available.")
+        response.hangup()
+        return HttpResponse(str(response), content_type='text/xml')
+
+    if campaign.greeting_enabled and campaign.greeting_message:
+        response.say(campaign.greeting_message)
+
+    call_data = {
+        'caller_number': request.POST.get('To', ''),
+        'caller_area_code': '',
+        'caller_state': '',
+        'call_time': timezone.now(),
+        'tags': ['click-to-call'],
+        'twilio_call_sid': request.POST.get('CallSid', ''),
+    }
+
+    routing_result = RoutingEngine.route_call(str(campaign.id), call_data)
+    destination = routing_result.get('destination')
+
+    if destination:
+        action_url = f"{settings.BASE_URL}/api/twilio/call-status/"
+        dial = Dial(
+            action=action_url,
+            method='POST',
+            timeout=30,
+            record='record-from-answer' if campaign.recording_enabled else 'do-not-record',
+        )
+        dial.number(destination)
+        response.append(dial)
+    else:
+        response.say("We are sorry, no agents are available right now.")
+        response.hangup()
+
+    return HttpResponse(str(response), content_type='text/xml')

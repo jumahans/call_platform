@@ -49,7 +49,14 @@ class Campaign(models.Model):
     # Recording
     recording_enabled = models.BooleanField(default=True)
     recording_storage = models.CharField(max_length=20, default='twilio')
+    
+    #bid floor 
+    bid_floor = models.DecimalField(max_digits=10, decimal_places=2, default=0, help_text='Minimum acceptable bid amount in RTB auction')
 
+    #time out 
+    rtb_timeout_seconds = models.IntegerField(default=5, help_text='Seconds buyers have to respond to RTB ping (1-30)')
+
+    
     # Call Queuing
     queue_enabled = models.BooleanField(default=False)
     queue_max_size = models.IntegerField(default=10)

@@ -24,7 +24,9 @@ class BuyerService:
             payout_amount=data.payout_amount,
             min_call_duration=data.min_call_duration,
             max_concurrency=data.max_concurrency,
-            status=Buyer.Status.ACTIVE
+            status=Buyer.Status.ACTIVE,
+            dup_window_days=data.dup_window_days,
+            quality_score=data.quality_score,
         )
 
         if data.cap:
@@ -47,7 +49,7 @@ class BuyerService:
             return Buyer.objects.select_related(
                 'cap', 'created_by'
             ).prefetch_related(
-                'campaign_assignments__campaign'
+                'campaign_buyers__campaign'
             ).get(
                 id=buyer_id,
                 organization=user.organization
@@ -211,7 +213,7 @@ class BuyerService:
                 'weight': a.weight,
                 'is_active': a.is_active,
             }
-            for a in buyer.campaign_assignments.all()
+            for a in buyer.campaign_buyers.all()
         ]
 
         return {
@@ -231,4 +233,6 @@ class BuyerService:
             'campaigns': campaigns,
             'created_at': buyer.created_at.isoformat(),
             'updated_at': buyer.updated_at.isoformat(),
+            'dup_window_days': buyer.dup_window_days,
+            'quality_score': buyer.quality_score,
         }

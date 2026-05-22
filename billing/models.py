@@ -25,6 +25,8 @@ class BillingAccount(models.Model):
     auto_recharge_amount = models.DecimalField(max_digits=10, decimal_places=2, default=50.00)
     auto_recharge_threshold = models.DecimalField(max_digits=10, decimal_places=2, default=10.00)
 
+
+    currency = models.CharField(max_length=3, default='USD', help_text='ISO 4217 currency code (USD, EUR, GBP, etc)')
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.ACTIVE)
 
     created_at = models.DateTimeField(auto_now_add=True)
@@ -55,6 +57,9 @@ class Transaction(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     organization = models.ForeignKey(Organization, on_delete=models.CASCADE, related_name='transactions')
     billing_account = models.ForeignKey(BillingAccount, on_delete=models.CASCADE, related_name='transactions')
+
+
+    currency = models.CharField(max_length=3, default='USD')
 
     transaction_type = models.CharField(max_length=20, choices=Type.choices)
     amount = models.DecimalField(max_digits=10, decimal_places=2)
@@ -104,6 +109,9 @@ class Invoice(models.Model):
     organization = models.ForeignKey(Organization, on_delete=models.CASCADE, related_name='invoices')
     billing_account = models.ForeignKey(BillingAccount, on_delete=models.CASCADE, related_name='invoices')
 
+
+    currency = models.CharField(max_length=3, default='USD')
+    
     invoice_number = models.CharField(max_length=50, unique=True)
     period_start = models.DateField()
     period_end = models.DateField()

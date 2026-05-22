@@ -96,7 +96,10 @@ class CallLogOutSchema(Schema):
     notes: str
     created_at: str
     updated_at: str
-
+    transcription_text: str = ''
+    transcription_status: str = ''
+    sentiment: str = ''
+    sentiment_score: Optional[float] = None
 
 class CallLogListSchema(Schema):
     id: str

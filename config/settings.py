@@ -4,6 +4,22 @@ from pathlib import Path
 from decouple import config
 from datetime import timedelta
 
+
+import sentry_sdk
+from sentry_sdk.integrations.django import DjangoIntegration
+from sentry_sdk.integrations.celery import CeleryIntegration
+
+sentry_sdk.init(
+    dsn=config('SENTRY_DSN', default=''),
+    integrations=[
+        DjangoIntegration(),
+        CeleryIntegration(),
+    ],
+    traces_sample_rate=0.1,
+    send_default_pii=False,
+    environment=config('ENVIRONMENT', default='development'),
+)
+
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 SECRET_KEY = config('SECRET_KEY', default='django-insecure-ud69xs!-nnj@2o99m9fv^wosqcp*bb73+*g&n0%dy&l($pxb#y')
@@ -196,3 +212,7 @@ EMAIL_USE_TLS = config('EMAIL_USE_TLS', cast=bool)
 EMAIL_HOST_USER = config('EMAIL_HOST_USER')
 EMAIL_HOST_PASSWORD = config('EMAIL_HOST_PASSWORD')
 DEFAULT_FROM_EMAIL = config('DEFAULT_FROM_EMAIL')
+
+
+
+ASSEMBLYAI_API_KEY = config('ASSEMBLYAI_API_KEY', default='')

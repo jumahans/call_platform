@@ -5,7 +5,10 @@ from accounts.api import JWTAuth
 from .schemas import (
     CreateWebhookSchema, UpdateWebhookSchema,
     WebhookOutSchema, WebhookDeliveryOutSchema,
-    MessageResponseSchema
+    MessageResponseSchema,
+    CreateConversionPixelSchema,
+    UpdateConversionPixelSchema,
+    ConversionPixelOutSchema
 )
 from .services import WebhookService
 
@@ -16,7 +19,7 @@ router = Router(tags=["Webhooks"], auth=JWTAuth())
 def create_webhook(request: HttpRequest, data: CreateWebhookSchema):
     try:
         webhook = WebhookService.create(data, request.auth)
-        return 201, WebhookService.format(webhook)
+        return 201, WebhookService.format(webhook) 
     except ValueError as e:
         return 400, {"detail": str(e)}
 
@@ -91,3 +94,78 @@ def test_webhook(request: HttpRequest, webhook_id: str):
         }
     except ValueError as e:
         return 400, {"detail": str(e)}
+    
+
+@router.post('/conversion/{token}', auth=None)
+def receive_conversion(request, token: str):
+    """Public endpoint — buyers fire this URL when a call converts."""
+    from webhooks.services import ConversionPixelService
+    import json
+
+    try:
+        payload = json.loads(request.body) if request.body else {}
+    except json.JSONDecodeError:
+        payload = dict(request.POST)
+
+    caller_number = payload.get('caller_number') or payload.get('phone') or ''
+    conversion_value = payload.get('conversion_value') or payload.get('value')
+    source_ip = request.META.get('REMOTE_ADDR')
+
+    if not caller_number:
+        return {'success': False, 'error': 'caller_number required'}
+
+    result = ConversionPixelService.record_conversion(
+        token=token,
+        caller_number=caller_number,
+        conversion_value=conversion_value,
+        raw_payload=payload,
+        source_ip=source_ip,
+    )
+    return result
+
+
+@router.post("/pixels/", response={201: ConversionPixelOutSchema, 400: dict})
+def create_pixel(request, data: CreateConversionPixelSchema):
+    from webhooks.services import ConversionPixelService
+    try:
+        pixel = ConversionPixelService.create_pixel(data, request.auth)
+        return 201, ConversionPixelService.format_pixel(pixel)
+    except ValueError as e:
+        return 400, {"detail": str(e)}
+
+
+@router.get("/pixels/", response={200: list[ConversionPixelOutSchema]})
+def list_pixels(request):
+    from webhooks.services import ConversionPixelService
+    pixels = ConversionPixelService.list_pixels(request.auth)
+    return [ConversionPixelService.format_pixel(p) for p in pixels]
+
+
+@router.get("/pixels/{pixel_id}", response={200: ConversionPixelOutSchema, 404: dict})
+def get_pixel(request, pixel_id: str):
+    from webhooks.services import ConversionPixelService
+    try:
+        pixel = ConversionPixelService.get_pixel(pixel_id, request.auth)
+        return ConversionPixelService.format_pixel(pixel)
+    except ValueError as e:
+        return 404, {"detail": str(e)}
+
+
+@router.patch("/pixels/{pixel_id}/", response={200: ConversionPixelOutSchema, 400: dict, 404: dict})
+def update_pixel(request, pixel_id: str, data: UpdateConversionPixelSchema):
+    from webhooks.services import ConversionPixelService
+    try:
+        pixel = ConversionPixelService.update_pixel(pixel_id, data, request.auth)
+        return ConversionPixelService.format_pixel(pixel)
+    except ValueError as e:
+        return 400, {"detail": str(e)}
+
+
+@router.delete("/pixels/{pixel_id}/", response={200: dict, 404: dict})
+def delete_pixel(request, pixel_id: str):
+    from webhooks.services import ConversionPixelService
+    try:
+        ConversionPixelService.delete_pixel(pixel_id, request.auth)
+        return {"message": "Pixel deleted", "success": True}
+    except ValueError as e:
+        return 404, {"detail": str(e)}

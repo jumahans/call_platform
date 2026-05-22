@@ -131,6 +131,12 @@ class CallLog(models.Model):
     tags = models.JSONField(default=list)
     notes = models.TextField(blank=True)
 
+    #transcription 
+    transcription_text = models.TextField(blank=True, default='')
+    transcription_status = models.CharField(max_length=20, default='pending')
+    sentiment = models.CharField(max_length=20, blank=True, default='')
+    sentiment_score = models.FloatField(null=True, blank=True)
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     answered_at = models.DateTimeField(null=True, blank=True)

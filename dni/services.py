@@ -230,7 +230,7 @@ class DNIService:
         ).order_by('-created_at').first()
 
     @staticmethod
-    def _expire_sessions():
+    def expire_sessions():
         """
         Marks expired sessions and releases their numbers back to pool.
         Called before every assignment.

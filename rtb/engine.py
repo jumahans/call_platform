@@ -25,7 +25,8 @@ class RTBEngine:
         start = time.monotonic()
 
         try:
-            async with httpx.AsyncClient(timeout=BID_TIMEOUT) as client:
+            timeout = ping_payload.get('_timeout', BID_TIMEOUT)
+            async with httpx.AsyncClient(timeout=timeout) as client:
                 response = await client.post(
                     buyer.rtb_endpoint,
                     json=ping_payload,
@@ -85,14 +86,22 @@ class RTBEngine:
         """
         start = time.monotonic()
 
-        ping_payload = {
-            'auction_id'   : str(auction.id),
-            'campaign_id'  : str(auction.campaign_id),
-            'caller_number': auction.caller_number,
-            'caller_state' : auction.caller_state,
-            'call_time'    : timezone.now().isoformat(),
-        }
+        timeout = auction.campaign.rtb_timeout_seconds or BID_TIMEOUT
 
+        # Derive area code from caller number (don't leak full number to losing bidders)
+        cleaned = auction.caller_number.replace('+1', '').replace('+', '')
+        caller_area_code = cleaned[:3] if len(cleaned) >= 3 else ''
+
+        ping_payload = {
+            'auction_id'      : str(auction.id),
+            'campaign_id'     : str(auction.campaign_id),
+            'caller_area_code': caller_area_code,
+            'caller_state'    : auction.caller_state,
+            'call_time'       : timezone.now().isoformat(),
+            'bid_floor'       : str(auction.campaign.bid_floor or 0),
+            'timeout_ms'      : timeout * 1000,
+            '_timeout'        : timeout,
+        }
         # Ping all buyers at the same time
         tasks = [
             RTBEngine.ping_buyer(buyer, auction, ping_payload)
@@ -117,10 +126,14 @@ class RTBEngine:
             bids.append((bid, result))
 
         # Find the winner — highest bid from a buyer who accepted
+        bid_floor = auction.campaign.bid_floor or Decimal('0')
         valid_bids = [
             (bid, result)
             for bid, result in bids
-            if result['accept'] and result['bid_amount'] and result['bid_amount'] > 0
+            if result['accept']
+            and result['bid_amount']
+            and result['bid_amount'] >= bid_floor
+            and result['bid_amount'] > 0
         ]
 
         if not valid_bids:
@@ -157,7 +170,7 @@ class RTBEngine:
         Synchronous entry point called by the routing engine.
         Creates the auction, fetches eligible RTB buyers, runs the async auction.
         """
-        from buyers.models import Buyer
+        from rtb.services import RTBService
 
         auction = RTBAuction.objects.create(
             organization_id=campaign.organization_id,
@@ -168,15 +181,8 @@ class RTBEngine:
             status=RTBAuction.Status.OPEN,
         )
 
-        # Get active buyers on this campaign that have an RTB endpoint configured
-        buyers = list(
-            Buyer.objects.filter(
-                campaign_buyers__campaign=campaign,
-                campaign_buyers__is_active=True,
-                status='active',
-                rtb_endpoint__isnull=False,
-            ).exclude(rtb_endpoint='')
-        )
+        # Get eligible buyers (filters out duplicates, caps, concurrency)
+        buyers = RTBService.get_eligible_buyers(campaign, caller_number)
 
         if not buyers:
             auction.status = RTBAuction.Status.NO_BIDS

@@ -89,14 +89,27 @@ class RoutingEngine:
 
     @staticmethod
     def is_duplicate(caller_number: str, campaign_id: str, block_hours: int) -> bool:
-        cache_key = f"duplicate_{campaign_id}_{caller_number}"
-        return cache.get(cache_key) is not None
+        from datetime import timedelta
+        if block_hours <= 0:
+            return False
+        cutoff = timezone.now() - timedelta(hours=block_hours)
+        return CallLog.objects.filter(
+            campaign_id=campaign_id,
+            caller_number=caller_number,
+            created_at__gte=cutoff,
+        ).exists()
+    
+    # @staticmethod
+    # def mark_as_called(caller_number: str, campaign_id: str, block_hours: int):
+    #     cache_key = f"duplicate_{campaign_id}_{caller_number}"
+    #     cache.set(cache_key, True, timeout=block_hours * 3600)
+
 
     @staticmethod
     def mark_as_called(caller_number: str, campaign_id: str, block_hours: int):
-        cache_key = f"duplicate_{campaign_id}_{caller_number}"
-        cache.set(cache_key, True, timeout=block_hours * 3600)
-
+        # No-op — dup detection now reads CallLog directly
+        pass
+    
     @staticmethod
     def check_campaign_caps(campaign) -> bool:
         try:

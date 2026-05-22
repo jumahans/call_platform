@@ -195,6 +195,7 @@ class BillingService:
             'auto_recharge_amount': account.auto_recharge_amount,
             'auto_recharge_threshold': account.auto_recharge_threshold,
             'stripe_customer_id': account.stripe_customer_id,
+            'currency': account.currency,
             'status': account.status,
             'organization_id': str(account.organization_id),
             'created_at': account.created_at.isoformat(),

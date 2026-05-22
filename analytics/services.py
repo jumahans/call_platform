@@ -363,3 +363,56 @@ def _map_twilio_status(twilio_status: str) -> str:
         'canceled':   'failed',
     }
     return mapping.get(twilio_status, 'completed')
+
+
+
+class CallerProfileService:
+    """Aggregated view of a caller across all calls."""
+
+    @staticmethod
+    def get_profile(organization_id: str, caller_number: str) -> dict:
+        from django.db.models import Count, Sum, Avg, Max, Min
+        from routing.models import CallLog
+
+        calls = CallLog.objects.filter(
+            organization_id=organization_id,
+            caller_number=caller_number,
+        )
+
+        total = calls.count()
+        if total == 0:
+            return {
+                'caller_number': caller_number,
+                'total_calls': 0,
+                'profile_exists': False,
+            }
+
+        stats = calls.aggregate(
+            total_duration=Sum('duration'),
+            avg_duration=Avg('duration'),
+            total_revenue=Sum('revenue'),
+            first_call=Min('created_at'),
+            last_call=Max('created_at'),
+        )
+
+        completed = calls.filter(status=CallLog.Status.COMPLETED).count()
+        unique_campaigns = calls.values('campaign_id').distinct().count()
+        unique_buyers = calls.exclude(buyer__isnull=True).values('buyer_id').distinct().count()
+
+        caller_state = calls.exclude(caller_state='').values_list('caller_state', flat=True).first() or ''
+
+        return {
+            'caller_number': caller_number,
+            'caller_state': caller_state,
+            'profile_exists': True,
+            'total_calls': total,
+            'completed_calls': completed,
+            'completion_rate': round((completed / total) * 100, 2) if total else 0,
+            'total_duration_seconds': stats['total_duration'] or 0,
+            'avg_duration_seconds': round(stats['avg_duration'] or 0, 2),
+            'total_revenue': str(stats['total_revenue'] or 0),
+            'unique_campaigns': unique_campaigns,
+            'unique_buyers_reached': unique_buyers,
+            'first_call_at': stats['first_call'].isoformat() if stats['first_call'] else None,
+            'last_call_at': stats['last_call'].isoformat() if stats['last_call'] else None,
+        }

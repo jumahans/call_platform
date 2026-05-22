@@ -1,7 +1,8 @@
+from billing.models import Transaction
 from config.celery import app
 from django.utils import timezone
 from datetime import timedelta
-
+from django.db.models import Q
 
 @app.task(name='tasks.reset_daily_caps')
 def reset_daily_caps():
@@ -31,20 +32,20 @@ def send_daily_summary():
                 continue
 
             # Get dashboard stats
-            from analytics.models import CallRecord
+            from routing.models import CallLog
             from django.db.models import Count, Sum
             from decimal import Decimal
 
             today = timezone.now().date()
             yesterday = today - timedelta(days=1)
 
-            stats = CallRecord.objects.filter(
+            stats = CallLog.objects.filter(
                 organization=org,
                 created_at__date=yesterday
             ).aggregate(
                 total_calls=Count('id'),
                 total_revenue=Sum('revenue'),
-                total_payout=Sum('payout'),
+                total_payout=Sum('buyer_payout'),
             )
 
             NotificationService.dispatch('daily.summary', org, {
@@ -86,7 +87,7 @@ def retry_failed_webhooks():
 def expire_dni_sessions():
     """Expire stale DNI sessions and release numbers back to pool"""
     from dni.services import DNIService
-    DNIService._expire_sessions()
+    DNIService.expire_sessions()
     return "DNI sessions expired"
 
 
@@ -119,9 +120,9 @@ def generate_monthly_invoices():
                 created_at__date__gte=last_month_start,
                 created_at__date__lte=last_month_end,
             ).aggregate(
-                total_revenue=Sum('amount', filter=__import__('django.db.models', fromlist=['Q']).Q(transaction_type='charge')),
-                total_payout=Sum('amount', filter=__import__('django.db.models', fromlist=['Q']).Q(transaction_type='payout')),
-                total_calls=Count('id', filter=__import__('django.db.models', fromlist=['Q']).Q(transaction_type='charge')),
+                total_revenue=Sum('amount', filter=Q(transaction_type='charge')),
+                total_payout=Sum('amount', filter=Q(transaction_type='payout')),
+                total_calls=Count('id', filter=Q(transaction_type='charge')),
             )
 
             total_revenue = stats['total_revenue'] or Decimal('0')
@@ -225,3 +226,18 @@ def send_notification(event: str, organization_id: str, data: dict):
         return f"Notification sent for {event}"
     except Organization.DoesNotExist:
         return f"Organization {organization_id} not found"
+
+
+@shared_task
+def transcribe_call_recording(call_log_id):
+    """Background task — transcribe a call recording and analyze sentiment."""
+    from routing.models import CallLog
+    from routing.transcription import TranscriptionService
+
+    try:
+        call_log = CallLog.objects.get(id=call_log_id)
+    except CallLog.DoesNotExist:
+        return f"CallLog {call_log_id} not found"
+
+    TranscriptionService.transcribe_call(call_log)
+    return f"Transcription done for call {call_log_id}: {call_log.transcription_status}"

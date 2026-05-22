@@ -22,7 +22,13 @@ class Buyer(models.Model):
     description = models.TextField(blank=True)
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.ACTIVE)
 
+
+    #quality score 
+    quality_score = models.IntegerField(default=50, help_text='0-100 quality score based on call outcomes')
+    quality_score_updated_at = models.DateTimeField(null=True, blank=True)
+
     # How calls are delivered to this buyer
+    dup_window_days = models.IntegerField(default=30, help_text='Days to block same caller from reaching this buyer again')
     routing_type = models.CharField(max_length=20, choices=RoutingType.choices, default=RoutingType.EXTERNAL)
     phone_number = models.CharField(max_length=20, blank=True)
     sip_endpoint = models.CharField(max_length=255, blank=True)
@@ -86,3 +92,35 @@ class BuyerCampaign(models.Model):
 
     def __str__(self):
         return f"{self.buyer.name} → {self.campaign.name}"
+
+
+
+
+class BuyerSchedule(models.Model):
+    """Weekly hours of operation for a buyer"""
+
+    class DayOfWeek(models.IntegerChoices):
+        MONDAY    = 0, 'Monday'
+        TUESDAY   = 1, 'Tuesday'
+        WEDNESDAY = 2, 'Wednesday'
+        THURSDAY  = 3, 'Thursday'
+        FRIDAY    = 4, 'Friday'
+        SATURDAY  = 5, 'Saturday'
+        SUNDAY    = 6, 'Sunday'
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    buyer = models.ForeignKey(Buyer, on_delete=models.CASCADE, related_name='schedules')
+    day_of_week = models.IntegerField(choices=DayOfWeek.choices)
+    start_time = models.TimeField()
+    end_time = models.TimeField()
+    timezone = models.CharField(max_length=50, default='UTC')
+    is_active = models.BooleanField(default=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'buyer_schedules'
+        unique_together = [('buyer', 'day_of_week')]
+
+    def __str__(self):
+        return f"{self.buyer.name} — {self.get_day_of_week_display()} {self.start_time}-{self.end_time}"

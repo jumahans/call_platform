@@ -77,3 +77,55 @@ class WebhookDelivery(models.Model):
 
     def __str__(self):
         return f"{self.event} → {self.webhook.url} ({self.status})"
+    
+
+
+class ConversionPixel(models.Model):
+    """
+    Postback URL fired by buyers when a call converts (sale, appointment, etc).
+    Credits the publisher and updates call log.
+    """
+
+    class Status(models.TextChoices):
+        ACTIVE = 'active', 'Active'
+        PAUSED = 'paused', 'Paused'
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    organization = models.ForeignKey('accounts.Organization', on_delete=models.CASCADE, related_name='conversion_pixels')
+    campaign = models.ForeignKey('campaigns.Campaign', on_delete=models.CASCADE, related_name='conversion_pixels', null=True, blank=True)
+
+    name = models.CharField(max_length=255)
+    token = models.CharField(max_length=64, unique=True, db_index=True, help_text='Unique token used in postback URL')
+    conversion_value = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.ACTIVE)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'conversion_pixels'
+
+    def __str__(self):
+        return f"{self.name} ({self.status})"
+
+
+class ConversionEvent(models.Model):
+    """Logs each conversion postback received."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    pixel = models.ForeignKey(ConversionPixel, on_delete=models.CASCADE, related_name='events')
+    call_log = models.ForeignKey('routing.CallLog', on_delete=models.SET_NULL, null=True, blank=True, related_name='conversions')
+
+    caller_number = models.CharField(max_length=20, blank=True)
+    conversion_value = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    raw_payload = models.JSONField(default=dict)
+    source_ip = models.GenericIPAddressField(null=True, blank=True)
+
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        db_table = 'conversion_events'
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"Conversion for {self.caller_number} (${self.conversion_value})"
