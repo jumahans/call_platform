@@ -9,4 +9,4 @@ urlpatterns = [
     path('queue-wait/<str:campaign_id>/', queue_views.queue_wait, name='queue_wait'),
     path('click-to-call/', twilio_handler.click_to_call, name='click_to_call'),
     path('click-to-call-connect/<str:campaign_id>/', twilio_handler.click_to_call_connect, name='click_to_call_connect'),
-]
+] 
