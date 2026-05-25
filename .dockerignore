@@ -16,8 +16,5 @@ sent_screenshots/
 proton_dump.html
 proton_selectors.txt
 zrotonmail.py
-Dockerfile
-docker-compose.yml
-.dockerignore
 README.md
 *.md
