@@ -4,8 +4,8 @@
     "builder": "DOCKERFILE",
     "dockerfilePath": "Dockerfile"
   },
-  "deploy": {
-    "startCommand": "daphne -b 0.0.0.0 -p $PORT config.asgi:application",
+"deploy": {
+    "startCommand": "python manage.py migrate && python manage.py collectstatic --noinput && daphne -b 0.0.0.0 -p $PORT config.asgi:application",
     "restartPolicyType": "ON_FAILURE"
   }
 }
