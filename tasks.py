@@ -3,6 +3,7 @@ from config.celery import app
 from django.utils import timezone
 from datetime import timedelta
 from django.db.models import Q
+from celery import shared_task
 
 @app.task(name='tasks.reset_daily_caps')
 def reset_daily_caps():
