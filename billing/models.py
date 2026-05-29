@@ -80,6 +80,16 @@ class Transaction(models.Model):
     publisher_id = models.UUIDField(null=True, blank=True)
     publisher_name = models.CharField(max_length=255, blank=True)
 
+    #coingate intergration 
+    # Provider
+    provider = models.CharField(max_length=20, default='stripe', blank=True)
+    coingate_order_id = models.CharField(max_length=255, blank=True)
+    coingate_payment_url = models.URLField(blank=True)
+
+    #capitalist.net 
+    capitalist_payment_id = models.CharField(max_length=255, blank=True)
+    capitalist_payment_url = models.URLField(blank=True)
+
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.PENDING)
 
     created_at = models.DateTimeField(auto_now_add=True)

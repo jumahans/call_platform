@@ -219,3 +219,16 @@ EMAIL_HOST_PASSWORD = config('EMAIL_HOST_PASSWORD', default='')
 DEFAULT_FROM_EMAIL = config('DEFAULT_FROM_EMAIL', default='noreply@example.com')
 
 ASSEMBLYAI_API_KEY = config('ASSEMBLYAI_API_KEY', default='')
+
+
+
+
+COINGATE_API_KEY = config('COINGATE_API_KEY', default='')
+COINGATE_ENVIRONMENT = config('COINGATE_ENVIRONMENT', default='sandbox')  # 'sandbox' or 'live'
+
+
+CAPITALIST_MERCHANT_ID = config('CAPITALIST_MERCHANT_ID', default='')
+CAPITALIST_SECRET = config('CAPITALIST_SECRET', default='')
+
+
+ASTERISK_SHARED_SECRET = config('ASTERISK_SHARED_SECRET', default='')

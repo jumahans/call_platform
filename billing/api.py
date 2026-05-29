@@ -2,6 +2,8 @@ from ninja import Router
 from django.http import HttpRequest
 from typing import List
 from decimal import Decimal
+from billing.coingate import CoinGateService
+from django.conf import settings
 from accounts.api import JWTAuth
 from .schemas import (
     DepositSchema, UpdateBillingSchema,
@@ -9,6 +11,8 @@ from .schemas import (
     InvoiceOutSchema, MessageResponseSchema
 )
 from .services import BillingService
+
+from .models import BillingAccount, Transaction, Invoice
 
 router = Router(tags=["Billing"], auth=JWTAuth())
 
@@ -165,3 +169,184 @@ def stripe_webhook(request: HttpRequest):
                 pass
 
     return 200, {"status": "ok"}
+
+
+@router.post("/deposit/coingate", response={200: dict, 400: dict})
+def coingate_deposit(request, amount: float):
+    """Create a CoinGate crypto checkout for the user to deposit funds."""
+    if amount <= 0:
+        return 400, {"detail": "Amount must be greater than 0"}
+
+    try:
+        account = BillingAccount.objects.get(organization=request.auth.organization)
+    except BillingAccount.DoesNotExist:
+        return 400, {"detail": "Billing account not found"}
+
+    # Create a pending transaction first
+    txn = Transaction.objects.create(
+        organization=request.auth.organization,
+        billing_account=account,
+        transaction_type=Transaction.Type.DEPOSIT,
+        amount=Decimal(str(amount)),
+        balance_before=account.balance,
+        balance_after=account.balance,
+        status=Transaction.Status.PENDING,
+        provider='coingate',
+        description=f'Crypto deposit of ${amount}',
+    )
+
+    backend_url = 'https://callplatform-production-02cb.up.railway.app'
+    frontend_url = getattr(settings, 'FRONTEND_URL', '')
+    try:
+        order = CoinGateService.create_order(
+            amount=Decimal(str(amount)),
+            currency='USD',
+            order_id=str(txn.id),
+            callback_url=f'{backend_url}/api/billing/coingate-webhook',
+            success_url=f'{frontend_url}/billing/success',
+            cancel_url=f'{frontend_url}/billing/cancel',
+            title='Account Deposit',
+            description=f'Deposit ${amount} to account',
+        )
+    except Exception as e:
+        txn.status = Transaction.Status.FAILED
+        txn.save()
+        return 400, {"detail": f"CoinGate error: {str(e)}"}
+
+    txn.coingate_order_id = str(order.get('id', ''))
+    txn.coingate_payment_url = order.get('payment_url', '')
+    txn.save()
+
+    return 200, {
+        "transaction_id": str(txn.id),
+        "coingate_order_id": txn.coingate_order_id,
+        "payment_url": txn.coingate_payment_url,
+        "amount": str(amount),
+    }
+
+@router.post("/coingate-webhook", auth=None, response={200: dict})
+def coingate_webhook(request):
+    """Public webhook — CoinGate posts here when payment status changes."""
+    import json
+    try:
+        data = json.loads(request.body.decode('utf-8'))
+    except Exception:
+        return 200, {"received": True}
+
+    coingate_order_id = str(data.get('id', ''))
+    order_id = data.get('order_id', '')  # our Transaction UUID
+    status = data.get('status', '')
+
+    if not order_id:
+        return 200, {"received": True}
+
+    try:
+        txn = Transaction.objects.get(id=order_id, provider='coingate')
+    except (Transaction.DoesNotExist, ValueError):
+        return 200, {"received": True}
+
+    # Verify with CoinGate (don't trust the webhook alone)
+    try:
+        verified = CoinGateService.get_order(coingate_order_id)
+        status = verified.get('status', status)
+    except Exception:
+        pass
+
+    if status in ('paid', 'confirmed') and txn.status != Transaction.Status.COMPLETED:
+        # Credit the balance
+        account = txn.billing_account
+        account.balance = account.balance + txn.amount
+        account.save()
+        txn.balance_after = account.balance
+        txn.status = Transaction.Status.COMPLETED
+        txn.save()
+    elif status in ('invalid', 'expired', 'canceled'):
+        txn.status = Transaction.Status.FAILED
+        txn.save()
+
+    return 200, {"received": True}
+
+
+
+@router.post("/deposit/capitalist", response={200: dict, 400: dict})
+def capitalist_deposit(request, amount: float):
+    """Create a Capitalist.net checkout for the user to deposit funds."""
+    if amount <= 0:
+        return 400, {"detail": "Amount must be greater than 0"}
+
+    try:
+        account = BillingAccount.objects.get(organization=request.auth.organization)
+    except BillingAccount.DoesNotExist:
+        return 400, {"detail": "Billing account not found"}
+
+    txn = Transaction.objects.create(
+        organization=request.auth.organization,
+        billing_account=account,
+        transaction_type=Transaction.Type.DEPOSIT,
+        amount=Decimal(str(amount)),
+        balance_before=account.balance,
+        balance_after=account.balance,
+        status=Transaction.Status.PENDING,
+        provider='capitalist',
+        description=f'Capitalist deposit of ${amount}',
+    )
+
+    from billing.capitalist import CapitalistService
+    checkout_url, params = CapitalistService.build_checkout(
+        amount=Decimal(str(amount)),
+        currency='USD',
+        order_id=str(txn.id),
+        description=f'Deposit ${amount} to account',
+    )
+
+    txn.capitalist_payment_id = str(txn.id)
+    txn.capitalist_payment_url = checkout_url
+    txn.save()
+
+    return 200, {
+        "transaction_id": str(txn.id),
+        "payment_url": checkout_url,
+        "amount": str(amount),
+    }
+
+
+@router.post("/capitalist-webhook", auth=None, response={200: dict})
+def capitalist_webhook(request):
+    """Public webhook — Capitalist posts here when payment status changes."""
+    from billing.capitalist import CapitalistService
+
+    data = request.POST.dict() if request.POST else {}
+    if not data:
+        import json
+        try:
+            data = json.loads(request.body.decode('utf-8'))
+        except Exception:
+            return 200, {"received": True}
+
+    # Verify signature before trusting anything
+    if not CapitalistService.verify_callback(data):
+        return 200, {"received": True}
+
+    order_id = data.get('order_id', '')
+    status = data.get('status', '')
+
+    if not order_id:
+        return 200, {"received": True}
+
+    try:
+        txn = Transaction.objects.get(id=order_id, provider='capitalist')
+    except (Transaction.DoesNotExist, ValueError):
+        return 200, {"received": True}
+
+    if status in ('paid', 'success', 'completed') and txn.status != Transaction.Status.COMPLETED:
+        account = txn.billing_account
+        account.balance = account.balance + txn.amount
+        account.save()
+        txn.balance_after = account.balance
+        txn.status = Transaction.Status.COMPLETED
+        txn.save()
+    elif status in ('failed', 'canceled', 'cancelled', 'rejected'):
+        txn.status = Transaction.Status.FAILED
+        txn.save()
+
+    return 200, {"received": True}
