@@ -232,3 +232,5 @@ CAPITALIST_SECRET = config('CAPITALIST_SECRET', default='')
 
 
 ASTERISK_SHARED_SECRET = config('ASTERISK_SHARED_SECRET', default='')
+
+IPQS_API_KEY = config('IPQS_API_KEY', default='')

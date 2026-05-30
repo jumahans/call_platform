@@ -1,3 +1,7 @@
+"""Asterisk handler — public endpoints called by Asterisk AGI/dialplan.
+
+Server-to-server calls (no JWT auth). Secured by a shared secret header.
+"""
 import json
 from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
@@ -13,13 +17,12 @@ from routing.engine import RoutingEngine
 def _check_secret(request):
     secret = request.headers.get('X-Asterisk-Secret', '')
     expected = getattr(settings, 'ASTERISK_SHARED_SECRET', '')
-    return secret and expected and secret == expected
+    return bool(secret and expected and secret == expected)
 
 
 @csrf_exempt
 @require_http_methods(["POST"])
 def route_incoming_call(request):
-    """Asterisk calls this when a call comes in. Returns the buyer to dial."""
     if not _check_secret(request):
         return JsonResponse({"error": "Forbidden"}, status=403)
 
@@ -37,7 +40,7 @@ def route_incoming_call(request):
 
     try:
         phone = PhoneNumber.objects.select_related('campaign').get(
-            number=called, is_active=True
+            number=called, status='active'
         )
     except PhoneNumber.DoesNotExist:
         return JsonResponse({"action": "hangup", "reason": "number_not_found"})
@@ -49,29 +52,55 @@ def route_incoming_call(request):
     call_log = CallLog.objects.create(
         organization=campaign.organization,
         campaign=campaign,
-        phone_number=phone,
         caller_number=caller,
         called_number=called,
-        twilio_call_sid=asterisk_call_id,
-        status='ringing',
-        started_at=timezone.now(),
+        twilio_call_sid=asterisk_call_id or f"asterisk-{timezone.now().timestamp()}",
+        status=CallLog.Status.RINGING,
     )
 
-    decision = RoutingEngine.route_call(campaign, caller, call_log)
+    # IPQualityScore spam/VOIP check
+    if getattr(campaign, 'ipqs_enabled', False):
+        from spam_protection.ipqs import IPQSService
+        ipqs_result = IPQSService.check_phone(caller)
+        if ipqs_result.get('success', True):
+            call_log.ipqs_checked = True
+            call_log.ipqs_fraud_score = ipqs_result.get('fraud_score', 0)
+            call_log.ipqs_is_voip = ipqs_result.get('VOIP', False)
+            call_log.ipqs_line_type = ipqs_result.get('line_type', '')
+            should_block, reason = IPQSService.should_block(ipqs_result, campaign)
+            if should_block:
+                call_log.ipqs_block_reason = reason
+                call_log.status = CallLog.Status.FAILED
+                call_log.ended_at = timezone.now()
+                call_log.save()
+                return JsonResponse({"action": "hangup", "reason": reason})
+            call_log.save()
 
-    if not decision or not decision.get('buyer'):
-        call_log.status = 'no_buyer'
+    decision = RoutingEngine.route_call(str(campaign.id), {
+        'caller_number': caller,
+        'twilio_call_sid': call_log.twilio_call_sid,
+    })
+
+    if not decision or decision.get('error') or not decision.get('destination'):
+        call_log.status = CallLog.Status.FAILED
         call_log.ended_at = timezone.now()
         call_log.save()
-        return JsonResponse({"action": "hangup", "reason": "no_buyer"})
+        return JsonResponse({
+            "action": "hangup",
+            "reason": decision.get('error', 'no_destination') if decision else 'no_decision'
+        })
 
-    buyer = decision['buyer']
-    call_log.buyer = buyer
+    buyer = decision.get('buyer')
+    if buyer:
+        call_log.buyer = buyer
+        call_log.destination_number = buyer.phone_number
+    else:
+        call_log.destination_number = decision['destination']
     call_log.save()
 
     return JsonResponse({
         "action": "dial",
-        "buyer_number": buyer.phone_number,
+        "buyer_number": decision['destination'],
         "call_log_id": str(call_log.id),
         "max_duration": 3600,
     })
@@ -80,7 +109,6 @@ def route_incoming_call(request):
 @csrf_exempt
 @require_http_methods(["POST"])
 def call_ended(request):
-    """Asterisk calls this when the call ends. Logs duration + status."""
     if not _check_secret(request):
         return JsonResponse({"error": "Forbidden"}, status=403)
 
@@ -102,9 +130,11 @@ def call_ended(request):
     except CallLog.DoesNotExist:
         return JsonResponse({"error": "Call not found"}, status=404)
 
-    call_log.duration_seconds = duration
-    call_log.status = 'completed' if answered else 'no_answer'
+    call_log.duration = duration
+    call_log.status = CallLog.Status.COMPLETED if answered else CallLog.Status.NO_ANSWER
     call_log.ended_at = timezone.now()
+    if answered:
+        call_log.answered_at = timezone.now()
     if recording_url:
         call_log.recording_url = recording_url
     call_log.save()

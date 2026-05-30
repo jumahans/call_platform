@@ -110,6 +110,14 @@ class CallLog(models.Model):
     twilio_call_sid = models.CharField(max_length=100, unique=True)
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.RINGING)
 
+
+    # IPQS data
+    ipqs_checked = models.BooleanField(default=False)
+    ipqs_fraud_score = models.IntegerField(null=True, blank=True)
+    ipqs_is_voip = models.BooleanField(default=False)
+    ipqs_line_type = models.CharField(max_length=50, blank=True)
+    ipqs_block_reason = models.CharField(max_length=100, blank=True)
+    
     # Tracking
     caller_area_code = models.CharField(max_length=5, blank=True)
     caller_state = models.CharField(max_length=50, blank=True)

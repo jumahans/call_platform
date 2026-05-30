@@ -56,6 +56,14 @@ class Campaign(models.Model):
     #time out 
     rtb_timeout_seconds = models.IntegerField(default=5, help_text='Seconds buyers have to respond to RTB ping (1-30)')
 
+    # IPQS spam/VOIP protection
+    ipqs_enabled = models.BooleanField(default=False)
+    block_voip = models.BooleanField(default=False)
+    block_risky = models.BooleanField(default=True)
+    block_spammer = models.BooleanField(default=True)
+    block_recent_abuse = models.BooleanField(default=True)
+    block_invalid_numbers = models.BooleanField(default=True)
+    max_fraud_score = models.IntegerField(default=85)
     
     # Call Queuing
     queue_enabled = models.BooleanField(default=False)
